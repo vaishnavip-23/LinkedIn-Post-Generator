@@ -1,9 +1,17 @@
 [project]
 name = "linkedin-post"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "AI-powered LinkedIn post generator using web research from Tavily and Exa"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
+    "openai",
+    "python-dotenv",
+    "instructor",
+    "tavily-python",
+    "exa-py",
+    "streamlit",
+    "uvicorn",
+    "httpx",
 ]
