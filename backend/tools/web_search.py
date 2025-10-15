@@ -58,7 +58,8 @@ async def _search_tavily(client: TavilyClient, query: str) -> List[SearchResult]
             query=query,
             max_results=3,
             search_depth="basic",  # Faster, more focused results
-            include_answer=False  # We only need search results
+            include_answer=False,  # We only need search results
+            include_raw_content=True  # Get full article content
         )
         raw_results = response.get("results", [])
         
@@ -69,8 +70,8 @@ async def _search_tavily(client: TavilyClient, query: str) -> List[SearchResult]
         validated_results = []
         for item in raw_results:
             try:
-                # Truncate content to 500 chars to avoid context overflow
-                content = item.get("content", "")[:500]
+                # Get full content (raw_content preferred, fallback to content)
+                content = item.get("raw_content") or item.get("content", "")
                 result = SearchResult(
                     title=item.get("title", ""),
                     url=item.get("url", ""),
@@ -94,9 +95,7 @@ async def _search_exa(client: Exa, query: str) -> List[SearchResult]:
         response = client.search_and_contents(
             query=query,
             num_results=3,
-            text={
-                "max_characters": 500  # Limit content length
-            },
+            text=True,  # Get full text content without character limit
             use_autoprompt=True  # Better query understanding
         )
         
@@ -107,8 +106,8 @@ async def _search_exa(client: Exa, query: str) -> List[SearchResult]:
         validated_results = []
         for item in response.results:
             try:
-                # Truncate content to 500 chars
-                content = (item.text or "")[:500]
+                # Get full text content
+                content = item.text or ""
                 result = SearchResult(
                     title=item.title or "",
                     url=item.url or "",
