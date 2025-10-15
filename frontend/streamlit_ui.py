@@ -35,6 +35,12 @@ if "messages" not in st.session_state:
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = None
 
+if "uploaded_file_id" not in st.session_state:
+    st.session_state.uploaded_file_id = None
+
+if "uploaded_filename" not in st.session_state:
+    st.session_state.uploaded_filename = None
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -76,6 +82,26 @@ async def generate_linkedin_post(query: str, conversation_id: Optional[str] = No
             return None
 
 
+async def upload_document(file) -> Optional[dict]:
+    """Upload PDF document to backend."""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            files = {"file": (file.name, file, "application/pdf")}
+            response = await client.post(
+                f"{API_URL}/api/upload-document",
+                files=files
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            error_detail = e.response.json().get("detail", e.response.text) if e.response.headers.get("content-type") == "application/json" else e.response.text
+            st.error(f"Upload Error: {error_detail}")
+            return None
+        except Exception as e:
+            st.error(f"Upload Error: {str(e)}")
+            return None
+
+
 def format_post_output(post_data: dict) -> str:
     """Format LinkedIn post with hashtags for display."""
     post = post_data["post"]
@@ -93,15 +119,24 @@ def format_post_output(post_data: dict) -> str:
     return content
 
 
-if prompt := st.chat_input("Enter a topic to research and generate a LinkedIn post"):
+# Build query with file_id if document is uploaded
+input_placeholder = "What topic would you like to create a LinkedIn post about?" if st.session_state.uploaded_file_id else "Enter a topic, YouTube URL, or upload a PDF document"
+
+if prompt := st.chat_input(input_placeholder):
+    # Add file_id context if document is uploaded
+    query = prompt
+    if st.session_state.uploaded_file_id:
+        query = f"[file_id: {st.session_state.uploaded_file_id}] {prompt}"
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     with st.chat_message("user"):
         st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        with st.spinner("🔍 Researching topic and generating LinkedIn post..."):
-            result = asyncio.run(generate_linkedin_post(prompt, st.session_state.conversation_id))
+        spinner_text = "📄 Analyzing document and generating LinkedIn post..." if st.session_state.uploaded_file_id else "🔍 Researching topic and generating LinkedIn post..."
+        with st.spinner(spinner_text):
+            result = asyncio.run(generate_linkedin_post(query, st.session_state.conversation_id))
             
             if result:
                 # Store conversation ID
@@ -131,19 +166,58 @@ if prompt := st.chat_input("Enter a topic to research and generate a LinkedIn po
                     "content": error_msg
                 })
 
+st.sidebar.markdown("### 📄 Upload Document")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload PDF (max 3MB)",
+    type=["pdf"],
+    help="Upload a PDF document to create LinkedIn posts about specific topics from it"
+)
+
+if uploaded_file is not None:
+    # Check if this is a new file
+    if st.session_state.uploaded_filename != uploaded_file.name:
+        with st.spinner("📤 Uploading and processing document..."):
+            result = asyncio.run(upload_document(uploaded_file))
+            
+            if result:
+                st.session_state.uploaded_file_id = result["file_id"]
+                st.session_state.uploaded_filename = result["filename"]
+                
+                # Show upload success
+                st.sidebar.success(f"✅ {result['filename']} uploaded!")
+                st.sidebar.info(f"**Tokens:** {result['token_count']:,}")
+                st.sidebar.info(f"**Mode:** {result['tier'].upper()}")
+                
+                # Add assistant message to chat
+                assistant_msg = result["message"]
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": assistant_msg
+                })
+                st.rerun()
+    else:
+        # File already uploaded
+        st.sidebar.success(f"✅ {st.session_state.uploaded_filename} ready")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 📖 How to Use")
 st.sidebar.markdown("""
+**Option 1: Web/YouTube**
 1. Enter a topic or YouTube URL
-2. AI researches and generates LinkedIn post
-3. Refine with follow-up requests
-4. Copy and publish to LinkedIn
+2. AI researches and generates post
 
-**Example Inputs:**
+**Option 2: PDF Document**
+1. Upload PDF document (max 3MB)
+2. Specify topic/angle from document
+3. AI creates focused post
+4. Ask multiple topics from same doc!
+
+**Examples:**
 - "AI trends in healthcare 2024"
-- "Remote team productivity tips"
 - "https://youtube.com/watch?v=..."
+- Upload PDF → "climate change impacts"
 
-**Refinement Examples:**
+**Refinements:**
 - "Make it more formal"
 - "Remove the emojis"
 - "Shorten to 200 words"
@@ -161,6 +235,8 @@ if st.sidebar.button("🔄 New Conversation", use_container_width=True):
     # Clear frontend state
     st.session_state.messages = []
     st.session_state.conversation_id = None
+    st.session_state.uploaded_file_id = None
+    st.session_state.uploaded_filename = None
     st.rerun()
 
 st.sidebar.markdown("---")

@@ -18,7 +18,7 @@ import os
 import uuid
 from typing import Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 import instructor
@@ -29,16 +29,31 @@ from backend.models.schema import (
     LinkedInPostRequest,
     LinkedInPostResponse,
     LinkedInPost,
-    ConversationMessage
+    ConversationMessage,
+    DocumentMetadata,
+    DocumentContent
 )
-from backend.prompts import LINKEDIN_SYSTEM_PROMPT
+from backend.prompts import LINKEDIN_SYSTEM_PROMPT, DOCUMENT_GROUNDING_PROMPT
 from backend.tools.web_search import web_search
 from backend.tools.youtube_transcribe import youtube_transcribe
+from backend.tools.file_search import file_search, set_document_store
+from backend.tools.document_utils import (
+    extract_text_from_pdf,
+    count_tokens,
+    validate_file_size,
+    validate_token_count,
+    determine_tier
+)
+from backend.tools.rag_pipeline import create_vector_store, delete_vector_store
 
 load_dotenv()
 
-# In-memory conversation storage (use Redis/DB for production)
+# In-memory storage (use Redis/DB for production)
 conversation_store: Dict[str, List[Dict[str, str]]] = {}
+document_store: Dict[str, DocumentContent] = {}
+
+# Initialize document store reference in file_search tool
+set_document_store(document_store)
 
 # Configure Logfire for tracing
 logfire.configure()
@@ -75,13 +90,22 @@ research_agent = Agent(
 Your job:
 1. **Analyze the user's query and conversation history**
 2. Determine if this is:
-   a) A NEW content request → Use appropriate tool (web_search or youtube_transcribe)
+   a) A NEW content request → Use appropriate tool
    b) A REFINEMENT request → No tool needed, just refine based on conversation history
    
 TOOL SELECTION (for NEW content requests):
+- Use file_search when user has uploaded a document (query contains [file_id: ...])
+  IMPORTANT: When file_id is present, ONLY use file_search - do NOT use web_search or youtube_transcribe
+  Extract the file_id and topic from the query and call file_search(file_id, topic_query)
 - Use youtube_transcribe when query contains a YouTube URL (youtube.com or youtu.be)
-- Use web_search for topics, trends, news, research questions
+- Use web_search for topics, trends, news, research questions (ONLY if no file_id present)
 - If youtube_transcribe fails (e.g., video too long), DO NOT try web_search as fallback
+
+FILE SEARCH USAGE:
+- Extract file_id from query like: [file_id: abc-123] climate change
+- Call: file_search(file_id="abc-123", topic_query="climate change")
+- The tool will return ONLY relevant content from the document
+- If topic not found in document, the system will handle that
 
 REFINEMENT HANDLING (for follow-up requests):
 - User asks to "make it more formal", "remove emojis", "shorten it" → NO TOOL, use conversation context
@@ -90,13 +114,14 @@ REFINEMENT HANDLING (for follow-up requests):
 
 CRITICAL RULES:
 - NEW content requests REQUIRE a tool call
+- If file_id exists in query, ONLY use file_search (ignore web/YouTube)
 - Refinement requests should NOT call tools
 - Each query type has ONE designated tool
 - Return tool errors to user - don't attempt fallbacks
 
 Simply return your analysis or tool results - it will be processed by the content generation system.""",
     model="gpt-4o-mini",
-    tools=[web_search, youtube_transcribe]
+    tools=[web_search, youtube_transcribe, file_search]
 )
 
 
@@ -106,13 +131,119 @@ async def root():
     return {
         "status": "active",
         "service": "LinkedIn Content Research Agent",
-        "version": "4.0.0",
-        "tools_available": ["web_search", "youtube_transcribe"],
+        "version": "5.0.0",
+        "tools_available": ["web_search", "youtube_transcribe", "file_search"],
         "endpoints": {
+            "upload_document": "/api/upload-document",
             "generate_post": "/api/generate-post",
             "clear_conversation": "/api/conversation/{conversation_id}"
         }
     }
+
+
+@app.post("/api/upload-document", response_model=DocumentMetadata)
+async def upload_document(file: UploadFile = File(...)):
+    """Upload and process PDF document for LinkedIn post generation.
+    
+    Flow:
+    1. Validate file size (≤3MB)
+    2. Extract text from PDF
+    3. Count tokens
+    4. Determine tier (direct ≤80k or RAG >80k)
+    5. Store in memory (full text or vector store)
+    
+    Returns:
+        DocumentMetadata with file_id, token count, tier, and next steps message
+    """
+    # Validate PDF format
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported. Please upload a PDF document."
+        )
+    
+    try:
+        # Read file content
+        content = await file.read()
+        file_size = len(content)
+        
+        # Validate file size (3MB limit)
+        validate_file_size(file_size)
+        
+        # Save temporarily for extraction
+        temp_path = f"/tmp/{uuid.uuid4()}.pdf"
+        with open(temp_path, "wb") as f:
+            f.write(content)
+        
+        # Extract text from PDF
+        text = extract_text_from_pdf(temp_path)
+        
+        # Clean up temp file
+        os.remove(temp_path)
+        
+        if not text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to extract text from PDF. The file may be empty or image-based."
+            )
+        
+        # Count tokens
+        token_count = count_tokens(text)
+        
+        # Validate token count (120k limit)
+        validate_token_count(token_count)
+        
+        # Determine processing tier
+        tier = determine_tier(token_count)
+        
+        # Generate unique file ID
+        file_id = str(uuid.uuid4())
+        
+        # Process based on tier
+        if tier == "direct":
+            # Store full text in memory
+            doc = DocumentContent(
+                file_id=file_id,
+                filename=file.filename,
+                token_count=token_count,
+                tier=tier,
+                full_text=text,
+                vector_store_id=None
+            )
+            message = "Document uploaded! What specific topic or angle would you like to create a LinkedIn post about?"
+        
+        else:  # RAG tier
+            # Create vector store with embeddings
+            vector_store_id = create_vector_store(file_id, text)
+            
+            doc = DocumentContent(
+                file_id=file_id,
+                filename=file.filename,
+                token_count=token_count,
+                tier=tier,
+                full_text=None,
+                vector_store_id=vector_store_id
+            )
+            message = "Large document uploaded and indexed! What specific topic or angle would you like to create a LinkedIn post about?"
+        
+        # Store document
+        document_store[file_id] = doc
+        
+        # Return metadata
+        return DocumentMetadata(
+            file_id=file_id,
+            filename=file.filename,
+            size_bytes=file_size,
+            token_count=token_count,
+            tier=tier,
+            message=message
+        )
+    
+    except ValueError as e:
+        # Handle validation errors (file size, token count)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}") from e
 
 
 @app.delete("/api/conversation/{conversation_id}")
@@ -275,6 +406,14 @@ def _generate_linkedin_post(query: str, research_data: str) -> LinkedInPost:
     Returns:
         LinkedInPost with structured content
     """
+    # Check if this is from a document (file_search tool)
+    is_document = "Document:" in research_data and ("Full document content:" in research_data or "Relevant sections retrieved" in research_data)
+    
+    # Build system prompt with document grounding if needed
+    system_prompt = LINKEDIN_SYSTEM_PROMPT
+    if is_document:
+        system_prompt = LINKEDIN_SYSTEM_PROMPT + "\n\n" + DOCUMENT_GROUNDING_PROMPT
+    
     user_prompt = f"""Topic: {query}
 
 Research Content:
@@ -282,17 +421,31 @@ Research Content:
 
 Create a compelling LinkedIn post that synthesizes this research following best practices."""
     
-    linkedin_post = instructor_client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_model=LinkedInPost,
-        messages=[
-            {"role": "system", "content": LINKEDIN_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.7
-    )
+    if is_document:
+        user_prompt += "\n\nREMINDER: Only use information explicitly stated in the document above. If the topic is not covered, you can still generate a response explaining this - use the content field to explain the topic is not in the document."
     
-    return linkedin_post
+    try:
+        linkedin_post = instructor_client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_model=LinkedInPost,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7
+        )
+        
+        # Check if the post is actually a "not found" message
+        if is_document and ("cannot create" in linkedin_post.content.lower() or "not covered in" in linkedin_post.content.lower() or "not present in" in linkedin_post.content.lower()):
+            # This is an error message, raise it
+            raise ValueError(linkedin_post.content)
+        
+        return linkedin_post
+    except Exception as e:
+        # If generation fails or topic not in document, raise clear error
+        if "cannot create" in str(e).lower() or "not covered" in str(e).lower() or "not present" in str(e).lower():
+            raise ValueError(str(e))
+        raise
 
 
 if __name__ == "__main__":

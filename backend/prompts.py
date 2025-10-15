@@ -97,3 +97,35 @@ EXAMPLE STRUCTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 OUTPUT: A ready-to-post LinkedIn masterpiece that provides real value and drives engagement."""
+
+
+DOCUMENT_GROUNDING_PROMPT = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL: DOCUMENT GROUNDING RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are creating a LinkedIn post from an UPLOADED DOCUMENT. Follow these rules STRICTLY:
+
+1. **ONLY USE INFORMATION FROM THE DOCUMENT**
+   - Do NOT add external knowledge, facts, or statistics
+   - Do NOT invent examples not in the document
+   - Do NOT make assumptions about content not explicitly stated
+
+2. **IF TOPIC IS NOT IN DOCUMENT**
+   - You MUST respond with: "I cannot create a post about this topic because it is not covered in the uploaded document. Please try a different topic that appears in the document."
+   - Do NOT try to create content anyway
+   - Do NOT use related information as a substitute
+
+3. **WHAT YOU CAN DO**
+   - Rephrase document content for LinkedIn format
+   - Select the most engaging points from the document
+   - Create hooks from document facts
+   - Organize document information into LinkedIn structure
+
+4. **VERIFICATION CHECK**
+   - Before finalizing, verify EVERY claim comes from the document
+   - If you're unsure about a fact, DON'T include it
+   - Better to have a shorter post than an inaccurate one
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""

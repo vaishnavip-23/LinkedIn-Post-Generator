@@ -126,4 +126,42 @@ class YouTubeContent(BaseModel):
         return url
 
 
+# ============================================================================
+# DOCUMENT SCHEMAS
+# ============================================================================
+
+class DocumentMetadata(BaseModel):
+    """Metadata returned after document upload."""
+    
+    file_id: str = Field(..., description="Unique identifier for uploaded document")
+    filename: str = Field(..., description="Original filename")
+    size_bytes: int = Field(..., description="File size in bytes")
+    token_count: int = Field(..., description="Total tokens in document")
+    tier: str = Field(..., description="Processing tier: 'direct' or 'rag'")
+    message: str = Field(..., description="User-facing message about next steps")
+
+
+class DocumentContent(BaseModel):
+    """Stored document content with full text or vector store reference."""
+    
+    file_id: str = Field(..., description="Unique identifier")
+    filename: str = Field(..., description="Original filename")
+    token_count: int = Field(..., description="Total tokens")
+    tier: str = Field(..., description="'direct' or 'rag'")
+    full_text: Optional[str] = Field(None, description="Full text for direct tier")
+    vector_store_id: Optional[str] = Field(None, description="ChromaDB collection ID for RAG tier")
+
+
+class QueryExpansion(BaseModel):
+    """Multi-query expansion for better RAG retrieval."""
+    
+    original_query: str = Field(..., description="User's original query")
+    expanded_queries: List[str] = Field(
+        ..., 
+        description="3-5 semantically similar query variations",
+        min_length=3,
+        max_length=5
+    )
+
+
 
