@@ -20,4 +20,7 @@ dependencies = [
     "instructor",
     "certifi",
     "logfire[fastapi]",
+    "pypdf",
+    "tiktoken",
+    "chromadb",
 ]
