@@ -39,19 +39,26 @@ for message in st.session_state.messages:
 
 async def generate_linkedin_post(query: str) -> Optional[dict]:
     """Call backend API to generate LinkedIn post from query."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         try:
             response = await client.post(
-                f"{API_URL}/api/generate-linkedin-post",
+                f"{API_URL}/api/generate-post",
                 json={"query": query}
             )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            st.error(f"API Error: {e.response.status_code} - {e.response.text}")
+            error_text = e.response.text
+            st.error(f"API Error: {e.response.status_code}")
+            with st.expander("Show error details"):
+                st.code(error_text)
+            return None
+        except httpx.TimeoutException as e:
+            st.error(f"Request timed out. The API might be processing a large request. Please try again.")
             return None
         except Exception as e:
             st.error(f"Connection Error: {str(e)}")
+            st.info("Make sure the backend is running at http://localhost:8000")
             return None
 
 
@@ -62,7 +69,11 @@ def format_post_output(post_data: dict) -> str:
     hashtags = post.get("hashtags", [])
     
     if hashtags:
-        hashtag_str = " ".join(f"#{tag}" for tag in hashtags)
+        # Check if hashtags already include # symbol
+        hashtag_str = " ".join(
+            tag if tag.startswith("#") else f"#{tag}" 
+            for tag in hashtags
+        )
         return f"{content}\n\n{hashtag_str}"
     
     return content
@@ -121,4 +132,4 @@ try:
         st.sidebar.error("❌ Backend Error")
 except:
     st.sidebar.error("❌ Backend Offline")
-    st.sidebar.code("uv run uvicorn backend.api:app --reload", language="bash")
+    st.sidebar.code("uv run uvicorn backend.main:app --reload", language="bash")
