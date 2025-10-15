@@ -120,7 +120,7 @@ CRITICAL RULES:
 - Return tool errors to user - don't attempt fallbacks
 
 Simply return your analysis or tool results - it will be processed by the content generation system.""",
-    model="gpt-5-mini",
+    model="gpt-4o-mini",
     tools=[web_search, youtube_transcribe, file_search]
 )
 
@@ -426,7 +426,7 @@ Create a compelling LinkedIn post that synthesizes this research following best 
     
     try:
         linkedin_post = instructor_client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             response_model=LinkedInPost,
             messages=[
                 {"role": "system", "content": system_prompt},
