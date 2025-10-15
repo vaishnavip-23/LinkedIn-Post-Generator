@@ -7,8 +7,9 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi",
     "openai",
+    "openai-agents",
+    "openai-whisper",
     "python-dotenv",
-    "instructor",
     "tavily-python",
     "exa-py",
     "streamlit",
@@ -16,5 +17,7 @@ dependencies = [
     "httpx",
     "yt-dlp",
     "pydantic",
+    "instructor",
+    "certifi",
     "logfire[fastapi]",
 ]
