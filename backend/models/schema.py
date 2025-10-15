@@ -13,7 +13,6 @@ Schema Categories:
 
 from typing import List, Optional
 from urllib.parse import urlparse
-import uuid
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
@@ -21,13 +20,6 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 # ============================================================================
 # API REQUEST/RESPONSE SCHEMAS
 # ============================================================================
-
-class ConversationMessage(BaseModel):
-    """Single message in conversation history."""
-    
-    role: str = Field(..., description="Message role: 'user' or 'assistant'")
-    content: str = Field(..., description="Message content")
-
 
 class LinkedInPostRequest(BaseModel):
     """API request for LinkedIn post generation."""
@@ -41,10 +33,6 @@ class LinkedInPostRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None,
         description="Conversation ID for maintaining session context"
-    )
-    history: Optional[List[ConversationMessage]] = Field(
-        default_factory=list,
-        description="Previous conversation messages for context"
     )
 
 
@@ -63,7 +51,7 @@ class LinkedInPost(BaseModel):
         ...,
         description="Complete LinkedIn post text following best practices",
         min_length=100,
-        max_length=3000
+        max_length=2600
     )
     hashtags: List[str] = Field(
         ...,
@@ -158,9 +146,9 @@ class QueryExpansion(BaseModel):
     original_query: str = Field(..., description="User's original query")
     expanded_queries: List[str] = Field(
         ..., 
-        description="3-5 semantically similar query variations",
+        description="Exactly 3 semantically similar query variations",
         min_length=3,
-        max_length=5
+        max_length=3
     )
 
 

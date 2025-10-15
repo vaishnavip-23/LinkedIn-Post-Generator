@@ -7,7 +7,6 @@ Handles PDF text extraction, token counting, and validation.
 import tiktoken
 from pypdf import PdfReader
 
-from backend.models.schema import DocumentValidation
 from backend.tools.file_search.config import (
     MAX_FILE_SIZE_BYTES,
     MAX_TOKEN_LIMIT,
@@ -66,54 +65,55 @@ def validate_file_size(size_bytes: int) -> None:
         )
 
 
-def validate_document(text: str, file_size_bytes: int) -> DocumentValidation:
-    """Validate document and determine processing tier.
-
+def validate_token_count(token_count: int) -> None:
+    """Validate token count is within limits.
+    
     Args:
-        text: Extracted document text
-        file_size_bytes: File size in bytes
-
-    Returns:
-        DocumentValidation with validation results
+        token_count: Number of tokens in document
+        
+    Raises:
+        ValueError: If tokens exceed MAX_TOKEN_LIMIT
     """
-    # Validate file size
-    try:
-        validate_file_size(file_size_bytes)
-    except ValueError as e:
-        return DocumentValidation(
-            is_valid=False,
-            token_count=0,
-            tier="",
-            error_message=str(e)
-        )
-
-    # Check for empty document
-    if not text.strip():
-        return DocumentValidation(
-            is_valid=False,
-            token_count=0,
-            tier="",
-            error_message="Unable to extract text from PDF. The file may be empty or image-based."
-        )
-
-    # Count tokens
-    token_count = count_tokens(text)
-
-    # Validate token count
     if token_count > MAX_TOKEN_LIMIT:
-        return DocumentValidation(
-            is_valid=False,
-            token_count=token_count,
-            tier="",
-            error_message=f"Document too long ({token_count:,} tokens). Maximum allowed is {MAX_TOKEN_LIMIT:,} tokens."
+        raise ValueError(
+            f"Document too long ({token_count:,} tokens). "
+            f"Maximum allowed is {MAX_TOKEN_LIMIT:,} tokens (~80-100 pages). "
+            f"Please upload a shorter document."
         )
 
-    # Determine tier
-    tier = "direct" if token_count <= DIRECT_TOKEN_LIMIT else "rag"
 
-    return DocumentValidation(
-        is_valid=True,
-        token_count=token_count,
-        tier=tier,
-        error_message=None
-    )
+def determine_tier(token_count: int) -> str:
+    """Determine processing tier based on token count.
+    
+    Args:
+        token_count: Number of tokens in document
+        
+    Returns:
+        'direct' if ≤80k tokens, 'rag' if >80k tokens
+    """
+    return "direct" if token_count <= DIRECT_TOKEN_LIMIT else "rag"
+
+
+def truncate_text(text: str, max_tokens: int = 100_000, model: str = "gpt-4o-mini") -> str:
+    """Truncate text to fit within token limit.
+    
+    Args:
+        text: Text to truncate
+        max_tokens: Maximum allowed tokens (default: 100k for GPT-4o mini)
+        model: Model name for encoding (default: gpt-4o-mini)
+        
+    Returns:
+        Truncated text if exceeds limit, otherwise original text
+    """
+    token_count = count_tokens(text)
+    
+    if token_count <= max_tokens:
+        return text
+    
+    # Truncate tokens and decode back to text
+    encoding = tiktoken.encoding_for_model(model)
+    tokens = encoding.encode(text)
+    truncated_tokens = tokens[:max_tokens]
+    truncated_text = encoding.decode(truncated_tokens)
+    
+    return truncated_text + "\n\n[Content truncated to fit token limit]"

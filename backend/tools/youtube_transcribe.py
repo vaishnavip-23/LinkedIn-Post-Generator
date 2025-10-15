@@ -8,7 +8,6 @@ Uses OpenAI Agents SDK @function_tool decorator.
 """
 
 import os
-import ssl
 import certifi
 
 import yt_dlp

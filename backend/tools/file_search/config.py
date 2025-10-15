@@ -17,4 +17,4 @@ TOP_K_CHUNKS = 10
 
 # Model settings
 EMBEDDING_MODEL = "text-embedding-3-small"
-LLM_MODEL = "gpt-4o-mini"  # Used for tiktoken encoding
+LLM_MODEL = "gpt-4o-mini"

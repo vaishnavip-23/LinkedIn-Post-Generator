@@ -29,22 +29,22 @@ from backend.models.schema import (
     LinkedInPostRequest,
     LinkedInPostResponse,
     LinkedInPost,
-    ConversationMessage,
     DocumentMetadata,
     DocumentContent
 )
 from backend.prompts import LINKEDIN_SYSTEM_PROMPT, DOCUMENT_GROUNDING_PROMPT
 from backend.tools.web_search import web_search
 from backend.tools.youtube_transcribe import youtube_transcribe
-from backend.tools.file_search import file_search, set_document_store
-from backend.tools.document_utils import (
+from backend.tools.file_search.tool import file_search, set_document_store
+from backend.tools.file_search.rag import create_vector_store, delete_vector_store
+from backend.tools.file_search.document_processor import (
     extract_text_from_pdf,
     count_tokens,
     validate_file_size,
     validate_token_count,
-    determine_tier
+    determine_tier,
+    truncate_text
 )
-from backend.tools.rag_pipeline import create_vector_store, delete_vector_store
 
 load_dotenv()
 
@@ -87,39 +87,73 @@ research_agent = Agent(
     name="LinkedIn Research Agent",
     instructions="""You are a research assistant for LinkedIn content creation.
 
-Your job:
-1. **Analyze the user's query and conversation history**
-2. Determine if this is:
-   a) A NEW content request → Use appropriate tool
-   b) A REFINEMENT request → No tool needed, just refine based on conversation history
-   
-TOOL SELECTION (for NEW content requests):
-- Use file_search when user has uploaded a document (query contains [file_id: ...])
-  IMPORTANT: When file_id is present, ONLY use file_search - do NOT use web_search or youtube_transcribe
-  Extract the file_id and topic from the query and call file_search(file_id, topic_query)
-- Use youtube_transcribe when query contains a YouTube URL (youtube.com or youtu.be)
-- Use web_search for topics, trends, news, research questions (ONLY if no file_id present)
-- If youtube_transcribe fails (e.g., video too long), DO NOT try web_search as fallback
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DECISION ORDER (Follow this EXACT sequence)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-FILE SEARCH USAGE:
-- Extract file_id from query like: [file_id: abc-123] climate change
-- Call: file_search(file_id="abc-123", topic_query="climate change")
-- The tool will return ONLY relevant content from the document
-- If topic not found in document, the system will handle that
+STEP 1: CHECK IF THIS IS A REFINEMENT REQUEST (Check CURRENT user message ONLY)
 
-REFINEMENT HANDLING (for follow-up requests):
-- User asks to "make it more formal", "remove emojis", "shorten it" → NO TOOL, use conversation context
-- User asks to "add more examples", "change tone" → NO TOOL, refine the previous post
-- Previous LinkedIn post is in conversation history - use it as reference
+Is the CURRENT request asking to modify/refine a previous post?
+
+REFINEMENT INDICATORS (if ANY of these are present → NO TOOL NEEDED):
+✓ "add more..." / "add some..." / "include..."
+✓ "remove..." / "delete..." / "take out..."
+✓ "make it more..." / "make it less..."
+✓ "shorten" / "shorter" / "longer" / "expand"
+✓ "change the tone" / "more formal" / "more casual"
+✓ "more emojis" / "fewer hashtags" / "different hashtags"
+✓ "rewrite" / "rephrase" / "improve"
+
+→ If REFINEMENT detected: Use conversation context to refine. DO NOT CALL ANY TOOL.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2: IF NOT REFINEMENT, CHECK FOR NEW CONTENT REQUEST
+
+Look at CURRENT user message ONLY (ignore conversation history for this check):
+
+A) Does CURRENT message contain [file_id: ...]?
+   → YES: Extract file_id and topic → Call file_search(file_id, topic_query)
+   → Example: "[file_id: abc-123] climate change" → file_search("abc-123", "climate change")
+
+B) Does CURRENT message contain a YouTube URL (youtube.com or youtu.be)?
+   → YES: Call youtube_transcribe(video_url)
+
+C) None of the above?
+   → Call web_search(query) for general topics, trends, news
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLES:
+
+Example 1 - REFINEMENT (NO TOOL):
+Previous: "User: [file_id: abc-123] climate change"
+Current: "add more emojis"
+→ This is REFINEMENT → Use conversation context → NO TOOL
+
+Example 2 - REFINEMENT (NO TOOL):
+Previous: "User: AI trends"
+Current: "make it more formal"
+→ This is REFINEMENT → Use conversation context → NO TOOL
+
+Example 3 - NEW CONTENT (USE TOOL):
+Current: "[file_id: abc-123] renewable energy"
+→ This is NEW CONTENT → Call file_search("abc-123", "renewable energy")
+
+Example 4 - NEW CONTENT (USE TOOL):
+Current: "cryptocurrency trends 2024"
+→ This is NEW CONTENT → Call web_search("cryptocurrency trends 2024")
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CRITICAL RULES:
-- NEW content requests REQUIRE a tool call
-- If file_id exists in query, ONLY use file_search (ignore web/YouTube)
-- Refinement requests should NOT call tools
-- Each query type has ONE designated tool
-- Return tool errors to user - don't attempt fallbacks
+1. ALWAYS check for refinement FIRST before checking for file_id/URL
+2. Only look at CURRENT user message, not conversation history, to detect file_id/URL
+3. If refinement detected, NEVER call any tool
+4. Each tool call is expensive - only use when absolutely necessary
+5. Return tool results as-is - content generation system will process them
 
-Simply return your analysis or tool results - it will be processed by the content generation system.""",
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━""",
     model="gpt-4o-mini",
     tools=[web_search, youtube_transcribe, file_search]
 )
@@ -351,6 +385,9 @@ async def generate_post(request: LinkedInPostRequest):
                 status_code=400,
                 detail="No research data returned from tools"
             )
+        
+        # Truncate research_data if it exceeds 100k tokens (for GPT-4o mini)
+        research_data = truncate_text(research_data, max_tokens=100_000)
         
         # Determine which tool was used
         tool_used = None

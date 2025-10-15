@@ -106,9 +106,9 @@ def expand_query(user_query: str) -> List[str]:
         user_query: Original user query
 
     Returns:
-        List including original + 3-5 variations
+        List including original + 3 variations
     """
-    prompt = f"""Generate 3-5 semantic variations of this query for better document retrieval:
+    prompt = f"""Generate exactly 3 semantic variations of this query for better document retrieval:
 
 Query: "{user_query}"
 
