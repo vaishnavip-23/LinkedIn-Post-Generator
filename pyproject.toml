@@ -14,4 +14,7 @@ dependencies = [
     "streamlit",
     "uvicorn",
     "httpx",
+    "yt-dlp",
+    "pydantic",
+    "logfire[fastapi]",
 ]
