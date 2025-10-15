@@ -4,122 +4,130 @@ Web Search Tool - Tavily and Exa API Integration
 Searches the web using both Tavily and Exa APIs in parallel,
 combines results, and deduplicates by URL.
 
-Decorated with @tool for automatic registration with the AI agent.
+Uses OpenAI Agents SDK @function_tool decorator and Pydantic for validation.
 """
 
 import os
 from typing import List
 from exa_py import Exa
 from tavily import TavilyClient
+from agents import function_tool
 
-from backend.models.schema import SearchResult, WebSearchResult
-from backend.tools.registry import tool
+from backend.models.schema import SearchResult
 
 
-@tool(
-    name="web_search",
-    description="Search the web using Tavily and Exa APIs for current information on any topic. Use this for general research, trends, news, articles, or any non-video content.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "The search query or topic to research"
-            }
-        },
-        "required": ["query"]
-    }
-)
-async def web_search(query: str) -> dict:
-    """
-    Execute web search across Tavily and Exa, return deduplicated results.
+@function_tool
+async def web_search(query: str) -> List[SearchResult]:
+    """Search the web for current information on any topic.
+    
+    Use this for general research, trends, news, articles, or any non-video content.
+    Searches both Tavily and Exa APIs, combines and deduplicates results.
     
     Args:
-        query: Search query string
+        query: The search query or topic to research
         
     Returns:
-        Dictionary with success status and formatted search results
+        List of SearchResult objects with title, URL, content, and source
     """
-    # Initialize clients
+    # Initialize API clients
     tavily_key = os.getenv("TAVILY_KEY")
     exa_key = os.getenv("EXA_KEY")
     
     if not tavily_key or not exa_key:
-        return {
-            "success": False,
-            "error": "API keys not configured",
-            "data": ""
-        }
+        raise ValueError("TAVILY_KEY and EXA_KEY must be set")
     
     tavily_client = TavilyClient(api_key=tavily_key)
     exa_client = Exa(api_key=exa_key)
     
-    # Execute searches in parallel
+    # Execute searches
     tavily_results = await _search_tavily(tavily_client, query)
     exa_results = await _search_exa(exa_client, query)
     
-    # Combine and deduplicate
+    # Combine and deduplicate by URL
     all_results = tavily_results + exa_results
     deduplicated = _deduplicate_by_url(all_results)
     
-    # Format results
-    web_search_result = WebSearchResult(
-        results=deduplicated,
-        total_results=len(deduplicated)
-    )
-    
-    # Format for post generation
-    formatted_data = _format_search_results(web_search_result)
-    
-    return {
-        "success": True,
-        "tool_name": "web_search",
-        "data": formatted_data
-    }
+    # Return structured data
+    return deduplicated
 
 
 async def _search_tavily(client: TavilyClient, query: str) -> List[SearchResult]:
-    """Search via Tavily API."""
+    """Search via Tavily API with Pydantic validation."""
     try:
-        response = client.search(query=query, max_results=5)
-        return [
-            SearchResult(
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                content=item.get("content", ""),
-                source="tavily"
-            )
-            for item in response.get("results", [])
-        ]
+        response = client.search(
+            query=query,
+            max_results=3,
+            search_depth="basic",  # Faster, more focused results
+            include_answer=False  # We only need search results
+        )
+        raw_results = response.get("results", [])
+        
+        if not raw_results:
+            return []
+        
+        # Validate and parse with Pydantic
+        validated_results = []
+        for item in raw_results:
+            try:
+                # Truncate content to 500 chars to avoid context overflow
+                content = item.get("content", "")[:500]
+                result = SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    content=content,
+                    source="tavily"
+                )
+                validated_results.append(result)
+            except Exception as e:
+                print(f"Skipping invalid Tavily result: {e}")
+                continue
+        
+        return validated_results
     except Exception as e:
         print(f"Tavily error: {e}")
         return []
 
 
 async def _search_exa(client: Exa, query: str) -> List[SearchResult]:
-    """Search via Exa API."""
+    """Search via Exa API with Pydantic validation."""
     try:
         response = client.search_and_contents(
             query=query,
-            num_results=5,
-            text=True
+            num_results=3,
+            text={
+                "max_characters": 500  # Limit content length
+            },
+            use_autoprompt=True  # Better query understanding
         )
-        return [
-            SearchResult(
-                title=item.title or "",
-                url=item.url or "",
-                content=item.text or "",
-                source="exa"
-            )
-            for item in response.results
-        ]
+        
+        if not response.results:
+            return []
+        
+        # Validate and parse with Pydantic
+        validated_results = []
+        for item in response.results:
+            try:
+                # Truncate content to 500 chars
+                content = (item.text or "")[:500]
+                result = SearchResult(
+                    title=item.title or "",
+                    url=item.url or "",
+                    content=content,
+                    source="exa"
+                )
+                validated_results.append(result)
+            except Exception as e:
+                print(f"Skipping invalid Exa result: {e}")
+                continue
+        
+        return validated_results
     except Exception as e:
         print(f"Exa error: {e}")
         return []
 
 
 def _deduplicate_by_url(results: List[SearchResult]) -> List[SearchResult]:
-    """Remove duplicate results based on URL."""
+    """Remove duplicate results based on URL - keeps first occurrence."""
     seen_urls = set()
     deduplicated = []
     
@@ -129,18 +137,3 @@ def _deduplicate_by_url(results: List[SearchResult]) -> List[SearchResult]:
             deduplicated.append(result)
     
     return deduplicated
-
-
-def _format_search_results(search_result: WebSearchResult) -> str:
-    """Format search results for LinkedIn post generation."""
-    formatted = []
-    
-    for idx, result in enumerate(search_result.results, 1):
-        formatted.append(
-            f"Source {idx} ({result.source}):\n"
-            f"Title: {result.title}\n"
-            f"URL: {result.url}\n"
-            f"Content: {result.content}"
-        )
-    
-    return "\n---\n".join(formatted)

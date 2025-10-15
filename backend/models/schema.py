@@ -12,12 +12,22 @@ Schema Categories:
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from urllib.parse import urlparse
+import uuid
+
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 # ============================================================================
 # API REQUEST/RESPONSE SCHEMAS
 # ============================================================================
+
+class ConversationMessage(BaseModel):
+    """Single message in conversation history."""
+    
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
 
 class LinkedInPostRequest(BaseModel):
     """API request for LinkedIn post generation."""
@@ -28,29 +38,56 @@ class LinkedInPostRequest(BaseModel):
         min_length=3,
         examples=["AI trends in healthcare", "https://youtube.com/watch?v=abc"]
     )
+    conversation_id: Optional[str] = Field(
+        None,
+        description="Conversation ID for maintaining session context"
+    )
+    history: Optional[List[ConversationMessage]] = Field(
+        default_factory=list,
+        description="Previous conversation messages for context"
+    )
 
 
 class LinkedInPost(BaseModel):
-    """Generated LinkedIn post with structured content."""
+    """Generated LinkedIn post with structured content.
     
-    content: str = Field(..., description="Complete LinkedIn post text")
-    hashtags: List[str] = Field(
-        default_factory=list, 
-        description="3-5 relevant hashtags"
+    This is the output from the LLM content generation.
+    The content should follow LinkedIn best practices:
+    - Strong hook in first 1-2 lines
+    - 3-5 short paragraphs with single line breaks
+    - Engaging CTA at the end
+    - 150-300 words total
+    """
+    
+    content: str = Field(
+        ...,
+        description="Complete LinkedIn post text following best practices",
+        min_length=100,
+        max_length=3000
     )
-    key_points: List[str] = Field(
-        default_factory=list,
-        description="Main insights from the post"
+    hashtags: List[str] = Field(
+        ...,
+        description="Exactly 3-5 relevant hashtags (mix of broad and niche)",
+        min_length=3,
+        max_length=5
     )
 
 
 class LinkedInPostResponse(BaseModel):
-    """API response containing generated LinkedIn post."""
+    """API response containing generated LinkedIn post and metadata.
     
-    post: LinkedInPost
+    This is the final response sent to the client, wrapping the generated
+    post with metadata about how it was created.
+    """
+    
+    post: LinkedInPost = Field(..., description="The generated LinkedIn post")
     tool_used: Optional[str] = Field(
-        None, 
-        description="Which tool was used (web_search or youtube_transcribe)"
+        None,
+        description="Which tool was used: 'web_search' or 'youtube_transcribe'"
+    )
+    conversation_id: str = Field(
+        ...,
+        description="Conversation ID for session tracking"
     )
 
 
@@ -67,13 +104,6 @@ class SearchResult(BaseModel):
     source: str = Field(..., description="API source (tavily or exa)")
 
 
-class WebSearchResult(BaseModel):
-    """Combined and deduplicated web search results."""
-    
-    results: List[SearchResult] = Field(default_factory=list)
-    total_results: int = Field(..., description="Number of unique results")
-
-
 # ============================================================================
 # YOUTUBE SCHEMAS
 # ============================================================================
@@ -81,21 +111,19 @@ class WebSearchResult(BaseModel):
 class YouTubeContent(BaseModel):
     """Transcribed YouTube video content."""
     
-    video_url: str = Field(..., description="YouTube video URL")
-    title: str = Field(..., description="Video title")
+    video_url: HttpUrl = Field(..., description="YouTube video URL")
+    title: str = Field(..., description="Video title", min_length=1)
     author: Optional[str] = Field(None, description="Channel name")
-    duration_seconds: int = Field(..., description="Video length in seconds")
-    transcript: str = Field(..., description="Full video transcript")
+    duration_seconds: int = Field(..., description="Video length in seconds", ge=1)
+    transcript: str = Field(..., description="Full video transcript", min_length=1)
+
+    @field_validator("video_url")
+    @classmethod
+    def validate_youtube_url(cls, url: HttpUrl) -> HttpUrl:
+        host = urlparse(str(url)).netloc.lower().split(":", 1)[0]
+        if not (host.endswith("youtube.com") or host.endswith("youtu.be")):
+            raise ValueError("video_url must be a valid YouTube URL")
+        return url
 
 
-# ============================================================================
-# TOOL EXECUTION SCHEMAS
-# ============================================================================
 
-class ToolExecutionResult(BaseModel):
-    """Result from executing any tool."""
-    
-    tool_name: str = Field(..., description="Name of executed tool")
-    success: bool = Field(..., description="Whether execution succeeded")
-    data: str = Field(..., description="Formatted result data")
-    error: Optional[str] = Field(None, description="Error message if failed")
