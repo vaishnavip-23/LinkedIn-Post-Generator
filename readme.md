@@ -4,17 +4,17 @@ An AI-powered app that turns topics, YouTube videos, and PDFs into engaging Link
 
 ### Features
 
-- **Web research**: Uses Tavily + Exa to gather fresh info
-- **YouTube to post**: Get transcripts from videos (≤15 min) and convert into a post
-- **PDF to post**: Upload up to 3MB; automatic direct/RAG handling
-- **Refinements**: Ask to shorten, change tone, add/remove emojis, etc.
-- **LinkedIn posting**: OAuth + post from the app
+- **Web research**: Uses Tavily + Exa to gather fresh info, with automatic content truncation to prevent context overflow
+- **YouTube to post**: Downloads audio via yt-dlp and transcribes with OpenAI Whisper API for videos ≤15 minutes
+- **PDF to post**: Upload up to 3MB; automatic direct/RAG handling via ChromaDB for large documents (>80k tokens)
+- **Refinements**: Ask to shorten, change tone, add/remove emojis, etc. with conversation history support
+- **LinkedIn posting**: OAuth + post directly from the app
 
 ### Tech Stack
 
-- **Backend**: FastAPI, OpenAI (GPT-4o-mini, Whisper), ChromaDB, Instructor, Pydantic, Logfire (dev)
-- **Tools**: Tavily, Exa, youtube-transcript-api (transcripts), YouTube oEmbed (metadata), PDF parsing (pypdf), tokenization (tiktoken)
-- **Frontend (primary)**: React + TypeScript, Vite, Tailwind, shadcn/ui
+- **Backend**: FastAPI, OpenAI Agents SDK, OpenAI (GPT-4o-mini, Whisper API), ChromaDB, Instructor, Pydantic, Logfire
+- **Tools**: Tavily API, Exa API, yt-dlp (audio download), OpenAI Whisper API (transcription), pypdf (PDF parsing), tiktoken (tokenization)
+- **Frontend (primary)**: React 19 + TypeScript, Vite, Tailwind CSS, shadcn/ui, axios
 - **Frontend (alt)**: Streamlit app for quick local usage
 
 ### Project Structure
@@ -22,42 +22,89 @@ An AI-powered app that turns topics, YouTube videos, and PDFs into engaging Link
 ```
 .
 ├── backend/
-│   ├── main.py                # FastAPI app + endpoints
-│   ├── prompts.py             # System prompts and grounding rules
-│   ├── models/schema.py       # Pydantic models
-│   └── tools/                 # web_search, youtube_transcribe, file_search (RAG)
-├── frontend-react/            # React app
-├── frontend-streamlit/        # Streamlit UI
-├── pyproject.toml             # Python dependencies (uv/poetry-style)
-├── render.yaml                # Render (backend) blueprint
+│   ├── main.py                     # FastAPI app with all API endpoints
+│   ├── prompts.py                  # LinkedIn system prompts and document grounding rules
+│   ├── models/
+│   │   └── schema.py               # Pydantic models for validation
+│   └── tools/
+│       ├── web_search.py           # Tavily + Exa integration with content truncation
+│       ├── youtube_transcribe.py   # yt-dlp + Whisper API transcription
+│       └── file_search/            # PDF processing and RAG (ChromaDB)
+│           ├── tool.py             # File search tool wrapper
+│           ├── rag.py              # Vector store operations
+│           ├── document_processor.py # PDF extraction and tokenization
+│           └── config.py           # RAG configuration
+├── frontend-react/
+│   ├── src/
+│   │   ├── components/             # UI components (shadcn/ui)
+│   │   ├── api/                    # Axios API client
+│   │   └── App.tsx                 # Main application
+│   └── package.json
+├── frontend-streamlit/
+│   └── streamlit_ui.py             # Alternative Streamlit interface
+├── pyproject.toml                  # Python dependencies (uv)
+├── uv.lock                         # Dependency lock file
+├── .env.example                    # Environment variables template
 └── README.md                  
 ```
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 20+
-- API keys: OpenAI, Tavily, Exa, LinkedIn Client Id and Key
-- **Note**: No FFmpeg or audio tools needed - YouTube transcripts are fetched directly 
+- **Python 3.10+** (required for OpenAI Agents SDK compatibility)
+- **Node.js 20+** (for React frontend)
+- **FFmpeg** (required by yt-dlp for audio extraction)
+- **API keys**: 
+  - OpenAI API key (required)
+  - Tavily API key (for web search)
+  - Exa API key (for web search)
+  - LinkedIn Client ID and Secret (optional, for posting feature) 
 
 ### Environment Variables
 
-Follow the `.env.example` file in the repo.
+Copy `.env.example` to `.env` and fill in your API keys:
 
-- Copy it to create your local `.env` and replace the placeholder values with secret keys
+```bash
+cp .env.example .env
+```
 
+Required variables:
+```env
+OPENAI_API_KEY=sk-your-openai-api-key-here
+TAVILY_KEY=tvly-your-tavily-api-key-here
+EXA_KEY=your-exa-api-key-here
+```
+
+Optional (for LinkedIn posting):
+```env
+LINKEDIN_CLIENT_ID=your-linkedin-client-id
+LINKEDIN_CLIENT_SECRET=your-linkedin-client-secret
+LINKEDIN_REDIRECT_URI=http://localhost:8000/api/linkedin/callback
+FRONTEND_URL=http://localhost:5173
+```
+
+**Note**: For LinkedIn OAuth, the redirect URI must match exactly in both your `.env` file and LinkedIn Developer Portal settings.
 
 ### Installation
 
-1. Backend dependencies
+1. **Install FFmpeg** (required for YouTube audio extraction)
+   - macOS: `brew install ffmpeg`
+   - Ubuntu/Debian: `sudo apt install ffmpeg`
+   - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
 
-```
+2. **Backend dependencies**
+
+```bash
 uv sync
 ```
 
-2. Frontend dependencies
-
+If you don't have `uv`, install it first:
+```bash
+pip install uv
 ```
+
+3. **Frontend dependencies**
+
+```bash
 cd frontend-react
 npm install
 cd ..
@@ -65,50 +112,74 @@ cd ..
 
 ### Running Locally
 
-- Backend (FastAPI)
+**Backend (FastAPI)**
 
-```
+```bash
 uv run uvicorn backend.main:app --reload
 ```
 
-- API: `http://localhost:8000`
-- Frontend (React)
+Backend runs at: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/`
 
-```
+**Frontend (React) - Primary UI**
+
+```bash
 cd frontend-react
 npm run dev
 ```
 
-- App: `http://localhost:5173`
+App runs at: `http://localhost:5173`
 
-- Alternative UI (Streamlit)
+**Alternative UI (Streamlit)**
 
+```bash
+uv run streamlit run frontend-streamlit/streamlit_ui.py
 ```
-cd frontend-streamlit
-streamlit run streamlit_ui.py
-```
+
+Streamlit app runs at: `http://localhost:8501`
 
 ### How To Use
 
 - **Web search**: Enter a topic like "AI trends in healthcare" and send.
-- **YouTube**: Paste a YouTube URL (≤15 minutes). The app fetches the transcript and generates a post. (Note: Only works with videos that have captions/transcripts - most do!)
-- **PDF**: Click upload, add a PDF (≤3MB), then ask questions like "[file_id: ...] cloud cost optimization" via the UI (the React/Streamlit client adds the `[file_id: ...]` automatically once uploaded).
+- **YouTube**: Paste a YouTube URL (≤15 minutes). The app downloads audio via yt-dlp, transcribes with Whisper API, and generates a post
+- **PDF**: Click upload, add a PDF (≤3MB). For large PDFs (>80k tokens), automatic RAG indexing via ChromaDB. Then ask questions like "cloud cost optimization" - the UI automatically handles file references
 - **Refine**: Ask “make it more formal,” “shorten to 200 words,” “remove emojis,” etc.
 
 ### How It Works (High-level)
 
-1. Client sends a query. If a PDF was uploaded, the client prefixes the message with `[file_id: ...]`.
-2. The backend agent decides which tool to use:
-   - `[file_id: ...]` → document search (direct text or RAG via ChromaDB)
-   - YouTube URL → fetch transcript using youtube-transcript-api
-   - Otherwise → web search (Tavily + Exa)
-3. The research result is formatted and passed to an LLM (via Instructor) to produce a structured LinkedIn post `{ content, hashtags }`.
-4. The client displays the post and allows refinements or posting to LinkedIn.
+1. **Input Processing**: 
+   - User submits query via POST `/api/generate-post`
+   - If a PDF was uploaded, client prefixes message with `[file_id: ...]` pattern
+   - Conversation history (last 2 messages) is prepended for context in refinements
+
+2. **Agent Tool Selection** (OpenAI Agents SDK):
+   - Agent analyzes the query and automatically selects the appropriate tool:
+     - `[file_id: ...]` pattern → `file_search` tool (direct text or RAG via ChromaDB)
+     - YouTube URL detected → `youtube_transcribe` tool (yt-dlp + Whisper API)
+     - Otherwise → `web_search` tool (Tavily + Exa with content truncation to 4000 chars per result)
+
+3. **Research Execution**:
+   - **Web Search**: Parallel queries to Tavily (3 results) and Exa (3 results), deduplicated by URL
+   - **YouTube**: Audio download via yt-dlp → OpenAI Whisper API transcription → full transcript
+   - **PDF**: 
+     - Small docs (<80k tokens): Direct text passed to LLM
+     - Large docs (>80k tokens): RAG retrieval with multi-query expansion via ChromaDB
+
+4. **Post Generation** (Instructor + Pydantic):
+   - Research data is truncated to 15k tokens max
+   - GPT-4o-mini generates structured LinkedIn post following best practices from system prompt
+   - Output validated via Pydantic schema: `{ content: str, hashtags: List[str] }`
+
+5. **Response & Refinement**:
+   - Client displays formatted post
+   - User can refine with follow-up queries (conversation history maintained)
+   - Optional: Post directly to LinkedIn via OAuth
 
 ### Notes and Limits
 
 - YouTube length limit: 15 minutes
-- YouTube transcript requirement: Videos must have captions/transcripts enabled (auto-generated or manual)
+- YouTube transcription: Uses yt-dlp for audio download + OpenAI Whisper API for transcription (works for all videos)
 - PDF size limit: 3MB; large docs switch to RAG automatically
 - Hashtags are returned separately; the UI combines them for display
 
