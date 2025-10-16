@@ -15,6 +15,9 @@ from agents import function_tool
 
 from backend.models.schema import SearchResult
 
+# Maximum characters per search result to prevent context overflow
+MAX_CONTENT_LENGTH = 4000
+
 
 @function_tool
 async def web_search(query: str) -> List[SearchResult]:
@@ -72,10 +75,12 @@ async def _search_tavily(client: TavilyClient, query: str) -> List[SearchResult]
             try:
                 # Get full content (raw_content preferred, fallback to content)
                 content = item.get("raw_content") or item.get("content", "")
+                # Truncate to prevent context overflow
+                truncated_content = _truncate_content(content)
                 result = SearchResult(
                     title=item.get("title", ""),
                     url=item.get("url", ""),
-                    content=content,
+                    content=truncated_content,
                     source="tavily"
                 )
                 validated_results.append(result)
@@ -108,10 +113,12 @@ async def _search_exa(client: Exa, query: str) -> List[SearchResult]:
             try:
                 # Get full text content
                 content = item.text or ""
+                # Truncate to prevent context overflow
+                truncated_content = _truncate_content(content)
                 result = SearchResult(
                     title=item.title or "",
                     url=item.url or "",
-                    content=content,
+                    content=truncated_content,
                     source="exa"
                 )
                 validated_results.append(result)
@@ -136,3 +143,20 @@ def _deduplicate_by_url(results: List[SearchResult]) -> List[SearchResult]:
             deduplicated.append(result)
     
     return deduplicated
+
+
+def _truncate_content(content: str, max_length: int = MAX_CONTENT_LENGTH) -> str:
+    """Truncate content to prevent context overflow.
+    
+    Args:
+        content: The full content text
+        max_length: Maximum character length (default: 4000)
+        
+    Returns:
+        Truncated content with ellipsis if needed
+    """
+    if len(content) <= max_length:
+        return content
+    
+    # Truncate and add indicator
+    return content[:max_length] + "... [content truncated]"
