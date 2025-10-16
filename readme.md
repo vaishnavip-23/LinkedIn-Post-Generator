@@ -1,6 +1,6 @@
 ## LinkedIn Post Generator
 
-An AI-powered app that turns topics, YouTube videos, and PDFs into engaging LinkedIn posts. Includes a React UI and an alternative Streamlit UI.
+An AI-powered application agent that turns topics, YouTube videos, and PDFs into engaging LinkedIn posts. Includes a React UI and an alternative Streamlit UI.
 
 ### Features
 
@@ -57,7 +57,7 @@ An AI-powered app that turns topics, YouTube videos, and PDFs into engaging Link
   - OpenAI API key (required)
   - Tavily API key (for web search)
   - Exa API key (for web search)
-  - LinkedIn Client ID and Secret (optional, for posting feature) 
+  - LinkedIn Client ID and Secret (for posting feature) 
 
 ### Environment Variables
 
@@ -74,7 +74,7 @@ TAVILY_KEY=tvly-your-tavily-api-key-here
 EXA_KEY=your-exa-api-key-here
 ```
 
-Optional (for LinkedIn posting):
+For LinkedIn posting:
 ```env
 LINKEDIN_CLIENT_ID=your-linkedin-client-id
 LINKEDIN_CLIENT_SECRET=your-linkedin-client-secret
