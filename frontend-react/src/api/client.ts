@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { GeneratePostRequest, GeneratePostResponse, DocumentMetadata, BackendStatus } from '@/types/api';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 export const api = axios.create({
   baseURL: API_URL,

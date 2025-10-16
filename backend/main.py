@@ -79,9 +79,19 @@ app = FastAPI(
 # Instrument FastAPI with Logfire
 logfire.instrument_fastapi(app)
 
+# Configure CORS - allow frontend domain
+allowed_origins = [
+    "http://localhost:5173",  # Local development
+    "http://localhost:3000",  # Alternative local port
+]
+
+# Add production frontend URL if set
+if FRONTEND_URL:
+    allowed_origins.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
