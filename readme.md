@@ -146,6 +146,12 @@ Streamlit app runs at: `http://localhost:8501`
 - **PDF**: Click upload, add a PDF (≤3MB). For large PDFs (>80k tokens), automatic RAG indexing via ChromaDB. Then ask questions like "cloud cost optimization" - the UI automatically handles file references
 - **Refine**: Ask “make it more formal,” “shorten to 200 words,” “remove emojis,” etc.
 
+### Example Screenshot 
+
+- Depicts response given a youtube video link
+
+![LinkedIn Post Generator - YouTube Video Response Example](example_screenshot.png)
+
 ### How It Works (High-level)
 
 1. **Input Processing**: 
