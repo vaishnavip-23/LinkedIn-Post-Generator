@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* LinkedIn Brand Colors - Enhanced */
+    --linkedin-blue: 201 100% 35%;
+    --linkedin-dark: 201 100% 27%;
+    --linkedin-light: 201 100% 96%;
+    
+    /* Light Mode - Vibrant & Clean */
+    --background: 210 20% 98%;           /* Slightly blue-tinted white */
+    --foreground: 210 15% 20%;           /* Rich dark blue-gray */
+    --card: 0 0% 100%;                   /* Pure white cards */
+    --card-foreground: 210 15% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 15% 20%;
+    --primary: 201 100% 40%;             /* Vibrant LinkedIn blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 201 50% 95%;            /* Soft blue tint */
+    --secondary-foreground: 210 15% 20%;
+    --muted: 210 15% 94%;
+    --muted-foreground: 210 12% 45%;
+    --accent: 201 80% 92%;               /* Bright accent blue */
+    --accent-foreground: 201 100% 30%;
+    --destructive: 0 85% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 15% 88%;
+    --input: 210 20% 92%;
+    --ring: 201 100% 50%;
+    --radius: 0.75rem;
+    
+    /* Gradient colors */
+    --gradient-from: 201 100% 45%;
+    --gradient-to: 220 95% 55%;
+  }
+
+  .dark {
+    /* Dark Mode - Modern & Sleek */
+    --background: 222 47% 11%;           /* Deep blue-black */
+    --foreground: 210 40% 98%;
+    --card: 222 47% 14%;                 /* Elevated dark blue */
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 14%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 201 95% 55%;              /* Bright LinkedIn blue */
+    --primary-foreground: 222 47% 11%;
+    --secondary: 222 47% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 30% 20%;
+    --muted-foreground: 215 20% 70%;
+    --accent: 201 80% 25%;               /* Darker accent for contrast */
+    --accent-foreground: 201 95% 85%;
+    --destructive: 0 85% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 30% 24%;
+    --input: 222 30% 18%;
+    --ring: 201 95% 60%;
+    
+    /* Gradient colors for dark mode */
+    --gradient-from: 201 95% 50%;
+    --gradient-to: 240 80% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+@layer utilities {
+  .gradient-border {
+    position: relative;
+    background: linear-gradient(
+      hsl(var(--background)),
+      hsl(var(--background))
+    ) padding-box,
+    linear-gradient(
+      135deg,
+      hsl(var(--gradient-from)),
+      hsl(var(--gradient-to))
+    ) border-box;
+    border: 2px solid transparent;
+  }
+  
+  .shimmer {
+    animation: shimmer 2s linear infinite;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--primary) / 0.1),
+      transparent
+    );
+    background-size: 200% 100%;
+  }
+  
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+  
+  .glow {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+  }
+  
+  .glow-hover:hover {
+    box-shadow: 0 0 30px hsl(var(--primary) / 0.5);
+  }
+  
+  @keyframes progress {
+    0% {
+      width: 0%;
+    }
+    50% {
+      width: 70%;
+    }
+    100% {
+      width: 95%;
+    }
+  }
+  
+  .animate-progress {
+    animation: progress 3s ease-in-out infinite;
+  }
+}
