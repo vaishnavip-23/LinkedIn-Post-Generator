@@ -16,13 +16,15 @@ Tools: web_search (Tavily + Exa) and youtube_transcribe (Whisper API)
 
 import os
 import uuid
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from openai import OpenAI
 import instructor
 import logfire
+import httpx
 from agents import Agent, Runner
 
 from backend.models.schema import (
@@ -36,7 +38,7 @@ from backend.prompts import LINKEDIN_SYSTEM_PROMPT, DOCUMENT_GROUNDING_PROMPT
 from backend.tools.web_search import web_search
 from backend.tools.youtube_transcribe import youtube_transcribe
 from backend.tools.file_search.tool import file_search, set_document_store
-from backend.tools.file_search.rag import create_vector_store, delete_vector_store
+from backend.tools.file_search.rag import create_vector_store
 from backend.tools.file_search.document_processor import (
     extract_text_from_pdf,
     count_tokens,
@@ -51,9 +53,16 @@ load_dotenv()
 # In-memory storage (use Redis/DB for production)
 conversation_store: Dict[str, List[Dict[str, str]]] = {}
 document_store: Dict[str, DocumentContent] = {}
+linkedin_tokens: Dict[str, str] = {}  # session_id -> access_token
 
 # Initialize document store reference in file_search tool
 set_document_store(document_store)
+
+# LinkedIn OAuth Configuration
+LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")
+LINKEDIN_CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET", "")
+LINKEDIN_REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI", "http://localhost:8000/api/linkedin/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 # Configure Logfire for tracing
 logfire.configure()
@@ -315,27 +324,21 @@ async def generate_post(request: LinkedInPostRequest):
             stored_history = conversation_store[conversation_id]
             
             if stored_history:
-                # Keep last 2 exchanges (4 messages) FULLY for refinements
-                recent_full = stored_history[-4:] if len(stored_history) > 4 else stored_history
-                # Keep older messages as summaries (truncated) if they exist
-                older_summary = stored_history[:-4] if len(stored_history) > 4 else []
+                # Keep only last 1 exchange (2 messages) to prevent context overflow
+                # This is enough for refinements while staying within token limits
+                recent_messages = stored_history[-2:] if len(stored_history) > 2 else stored_history
                 
                 context_parts = []
                 
-                # Add older context as brief summary (only user queries)
-                if older_summary:
-                    user_queries = [msg['content'][:100] for msg in older_summary if msg['role'] == 'user']
-                    if user_queries:
-                        context_parts.append(f"Earlier topics discussed: {', '.join(user_queries)}")
-                
-                # Add recent exchanges FULLY (especially assistant's posts for refinement)
-                for msg in recent_full:
+                # Add recent exchanges with smart truncation
+                for msg in recent_messages:
                     role = "User" if msg["role"] == "user" else "Assistant"
-                    # Keep assistant messages (LinkedIn posts) FULL, truncate only long user messages
+                    # Truncate both user and assistant messages to key content
                     if msg["role"] == "assistant":
-                        content = msg["content"]  # FULL post for refinement
+                        # Keep first 1000 chars of post (still has key content)
+                        content = msg["content"][:1000] if len(msg["content"]) > 1000 else msg["content"]
                     else:
-                        content = msg["content"][:300] if len(msg["content"]) > 300 else msg["content"]
+                        content = msg["content"][:200] if len(msg["content"]) > 200 else msg["content"]
                     context_parts.append(f"{role}: {content}")
                 
                 context_str = "\n\n".join(context_parts)
@@ -386,8 +389,10 @@ async def generate_post(request: LinkedInPostRequest):
                 detail="No research data returned from tools"
             )
         
-        # Truncate research_data if it exceeds 100k tokens (for GPT-4o mini)
-        research_data = truncate_text(research_data, max_tokens=100_000)
+        # Truncate research_data to fit within GPT-4o-mini context (128k)
+        # Reserve space for prompts (~2k), conversation history (~5k), and safety buffer (~10k)
+        # Max research data: ~15k tokens to be safe
+        research_data = truncate_text(research_data, max_tokens=15_000)
         
         # Determine which tool was used
         tool_used = None
@@ -456,7 +461,13 @@ def _generate_linkedin_post(query: str, research_data: str) -> LinkedInPost:
 Research Content:
 {research_data}
 
-Create a compelling LinkedIn post that synthesizes this research following best practices."""
+Create a compelling LinkedIn post that synthesizes this research following best practices.
+
+CRITICAL: Return TWO separate fields:
+1. "content" - Post text WITHOUT hashtags
+2. "hashtags" - Array of 3-5 hashtag strings (e.g., ["AI", "Tech", "Innovation"])
+
+Do NOT include any hashtags in the content field."""
     
     if is_document:
         user_prompt += "\n\nREMINDER: Only use information explicitly stated in the document above. If the topic is not covered, you can still generate a response explaining this - use the content field to explain the topic is not in the document."
@@ -479,10 +490,205 @@ Create a compelling LinkedIn post that synthesizes this research following best 
         
         return linkedin_post
     except Exception as e:
+        # Handle context length errors
+        if "context_length_exceeded" in str(e) or "context window" in str(e).lower():
+            # Try again with more aggressive truncation
+            research_data_short = truncate_text(research_data, max_tokens=8_000)
+            user_prompt_short = f"""Topic: {query}
+
+Research Content (truncated):
+{research_data_short}
+
+Create a compelling LinkedIn post that synthesizes this research following best practices.
+
+CRITICAL: Return TWO separate fields:
+1. "content" - Post text WITHOUT hashtags
+2. "hashtags" - Array of 3-5 hashtag strings
+
+Do NOT include hashtags in content."""
+            
+            if is_document:
+                user_prompt_short += "\n\nREMINDER: Only use information explicitly stated in the document above."
+            
+            # Retry with shorter content
+            linkedin_post = instructor_client.chat.completions.create(
+                model="gpt-4o-mini",
+                response_model=LinkedInPost,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt_short}
+                ],
+                temperature=0.7
+            )
+            return linkedin_post
+        
         # If generation fails or topic not in document, raise clear error
         if "cannot create" in str(e).lower() or "not covered" in str(e).lower() or "not present" in str(e).lower():
             raise ValueError(str(e))
         raise
+
+
+# ============================================================================
+# LINKEDIN OAUTH & POSTING ENDPOINTS
+# ============================================================================
+
+@app.get("/api/linkedin/auth")
+async def linkedin_auth():
+    """Initiate LinkedIn OAuth flow"""
+    if not LINKEDIN_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="LinkedIn OAuth not configured")
+    
+    # Generate a session ID for this OAuth flow
+    session_id = str(uuid.uuid4())
+    
+    # LinkedIn authorization URL
+    auth_url = (
+        f"https://www.linkedin.com/oauth/v2/authorization"
+        f"?response_type=code"
+        f"&client_id={LINKEDIN_CLIENT_ID}"
+        f"&redirect_uri={LINKEDIN_REDIRECT_URI}"
+        f"&state={session_id}"
+        f"&scope=openid profile email w_member_social"
+    )
+    
+    return {"auth_url": auth_url, "session_id": session_id}
+
+
+@app.get("/api/linkedin/callback")
+async def linkedin_callback(code: str, state: str):
+    """Handle LinkedIn OAuth callback"""
+    if not LINKEDIN_CLIENT_ID or not LINKEDIN_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="LinkedIn OAuth not configured")
+    
+    # Exchange authorization code for access token
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            "https://www.linkedin.com/oauth/v2/accessToken",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": LINKEDIN_REDIRECT_URI,
+                "client_id": LINKEDIN_CLIENT_ID,
+                "client_secret": LINKEDIN_CLIENT_SECRET,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        
+        if token_response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to exchange code for token: {token_response.text}"
+            )
+        
+        token_data = token_response.json()
+        access_token = token_data.get("access_token")
+        
+        # Store the access token with session ID
+        linkedin_tokens[state] = access_token
+        
+        # Redirect back to frontend with session ID
+        return RedirectResponse(url=f"{FRONTEND_URL}?linkedin_session={state}")
+
+
+@app.get("/api/linkedin/profile")
+async def get_linkedin_profile(session_id: str):
+    """Get LinkedIn profile for authenticated user"""
+    if session_id not in linkedin_tokens:
+        raise HTTPException(status_code=401, detail="Not authenticated with LinkedIn")
+    
+    access_token = linkedin_tokens[session_id]
+    
+    async with httpx.AsyncClient() as client:
+        # Get user info
+        profile_response = await client.get(
+            "https://api.linkedin.com/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        
+        if profile_response.status_code != 200:
+            raise HTTPException(
+                status_code=profile_response.status_code,
+                detail="Failed to fetch LinkedIn profile"
+            )
+        
+        return profile_response.json()
+
+
+@app.post("/api/linkedin/post")
+async def post_to_linkedin(
+    session_id: str,
+    content: str,
+    hashtags: Optional[List[str]] = None
+):
+    """Post content to LinkedIn on behalf of user"""
+    if session_id not in linkedin_tokens:
+        raise HTTPException(status_code=401, detail="Not authenticated with LinkedIn")
+    
+    access_token = linkedin_tokens[session_id]
+    
+    # Combine content and hashtags
+    full_content = content
+    if hashtags:
+        formatted_hashtags = " ".join(
+            [tag if tag.startswith("#") else f"#{tag}" for tag in hashtags]
+        )
+        full_content = f"{content}\n\n{formatted_hashtags}"
+    
+    async with httpx.AsyncClient() as client:
+        # Get user's Person URN
+        profile_response = await client.get(
+            "https://api.linkedin.com/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        
+        if profile_response.status_code != 200:
+            raise HTTPException(
+                status_code=profile_response.status_code,
+                detail="Failed to fetch user profile"
+            )
+        
+        profile_data = profile_response.json()
+        person_urn = profile_data.get("sub")  # OpenID Connect 'sub' claim is the Person URN
+        
+        # Create the post using UGC Posts API
+        post_data = {
+            "author": f"urn:li:person:{person_urn}",
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": full_content},
+                    "shareMediaCategory": "NONE",
+                }
+            },
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        }
+        
+        post_response = await client.post(
+            "https://api.linkedin.com/v2/ugcPosts",
+            json=post_data,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+                "X-Restli-Protocol-Version": "2.0.0",
+            },
+        )
+        
+        if post_response.status_code not in [200, 201]:
+            raise HTTPException(
+                status_code=post_response.status_code,
+                detail=f"Failed to post to LinkedIn: {post_response.text}"
+            )
+        
+        return {"success": True, "message": "Posted to LinkedIn successfully"}
+
+
+@app.delete("/api/linkedin/logout")
+async def linkedin_logout(session_id: str):
+    """Logout from LinkedIn"""
+    if session_id in linkedin_tokens:
+        del linkedin_tokens[session_id]
+    
+    return {"success": True, "message": "Logged out from LinkedIn"}
 
 
 if __name__ == "__main__":

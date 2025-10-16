@@ -45,17 +45,18 @@ class LinkedInPost(BaseModel):
     - 3-5 short paragraphs with single line breaks
     - Engaging CTA at the end
     - 150-300 words total
+    - Hashtags MUST be in separate field, NOT in content
     """
     
     content: str = Field(
         ...,
-        description="Complete LinkedIn post text following best practices",
+        description="LinkedIn post text WITHOUT hashtags. Do not include any hashtags in this field. Just the post content.",
         min_length=100,
         max_length=2600
     )
     hashtags: List[str] = Field(
         ...,
-        description="Exactly 3-5 relevant hashtags (mix of broad and niche)",
+        description="Array of 3-5 hashtag strings WITHOUT # symbol (e.g., ['AI', 'TechForGood', 'Innovation']). Do not include these in content field.",
         min_length=3,
         max_length=5
     )

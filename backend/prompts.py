@@ -35,11 +35,8 @@ POST STRUCTURE (Follow strictly)
    • Ask an engaging question that invites discussion
    • OR make a bold statement that sparks debate
    • OR share a personal takeaway that resonates
-   
-4. HASHTAGS (Separate line at the end)
-   • Exactly 3-5 hashtags
-   • Mix: 1-2 broad tags (#AI #Leadership) + 2-3 niche tags (#AIinHealthcare)
-   • Place on a new line after the post
+
+IMPORTANT: DO NOT include hashtags in the post content. They will be provided separately in the 'hashtags' field.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TONE & VOICE GUIDELINES
@@ -92,9 +89,19 @@ EXAMPLE STRUCTURE
 
 [CTA - question or bold statement]
 
-#Hashtag1 #Hashtag2 #Hashtag3
+(NO HASHTAGS IN CONTENT - they go in separate 'hashtags' field)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You MUST return a structured response with TWO separate fields:
+
+1. "content": The LinkedIn post text (WITHOUT any hashtags)
+2. "hashtags": An array of 3-5 hashtag strings WITHOUT # symbols
+   Example: ["AI", "TechForGood", "Innovation"]
+
+CRITICAL: Do NOT include hashtags anywhere in the content field. They must be separate.
 
 OUTPUT: A ready-to-post LinkedIn masterpiece that provides real value and drives engagement."""
 
