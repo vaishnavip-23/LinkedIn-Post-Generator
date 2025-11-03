@@ -198,4 +198,4 @@ Streamlit app runs at: `http://localhost:8501`
 
 ### Final Thoughts and Thank you note
 I would like to thank the ProspelloAI team for an engaging and thoughtfully designed hackathon challenge. Over the course of 48 hours, I built end-to-end product that showcases practical use of the OpenAI SDK, integrated web search via Tavily and Exa, and a deliberate design choice for document handling—selecting between RAG and direct LLM generation through a smart PDF pipeline. The system produces structured outputs using Instructor and Pydantic, features a clean, modern UI, and supports real-world workflows, including posting directly to LinkedIn. Beyond the technical depth, the application serves as a creative partner—helping users brainstorm and post with one click.
-I truly enjoyed working on this, hope it helps your team to gauge may technical competence. Look forward to your review and inputs.  Thank you.
+I truly enjoyed working on this, hope it helps your team to gauge my technical competence. Look forward to your review and inputs.  Thank you.
