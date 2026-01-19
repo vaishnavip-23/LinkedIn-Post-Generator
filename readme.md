@@ -1,6 +1,6 @@
 ## LinkedIn Post Generator
 
-An AI-powered application agent that turns topics, YouTube videos, and PDFs into engaging LinkedIn posts. Includes a React UI and an alternative Streamlit UI.
+An AI-powered application agent that turns topics/keywords, YouTube videos, and PDFs into engaging LinkedIn posts. Includes a React UI and an alternative Streamlit UI.
 
 ### Features
 
