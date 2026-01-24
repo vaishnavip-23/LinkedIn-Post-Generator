@@ -6,7 +6,7 @@ An AI-powered application agent that turns topics/keywords, YouTube videos, and 
 
 - **Web research**: Uses Tavily + Exa to gather fresh info, with automatic content truncation to prevent context overflow
 - **YouTube to post**: Downloads audio via yt-dlp and transcribes with OpenAI Whisper API for videos ≤15 minutes
-- **PDF to post**: Upload up to 3MB; automatic direct/RAG handling via ChromaDB for large documents (>80k tokens)
+- **PDF to post**: Upload up to 3MB; automatic direct/RAG handling via ChromaDB for large documents(>80k tokens)
 - **Refinements**: Ask to shorten, change tone, add/remove emojis, etc. with conversation history support
 - **LinkedIn posting**: OAuth + post directly from the app
 
